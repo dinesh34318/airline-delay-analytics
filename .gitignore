@@ -1,0 +1,19 @@
+# ── Data files (too large for GitHub) ──
+dataset/raw/
+dataset/processed/
+dataset/metadata/*.csv
+
+# ── R installer binaries ──
+R/*.exe
+R/library/
+
+# ── Logs ──
+logs/
+
+# ── OS / IDE ──
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.Rhistory
+.Rdata
