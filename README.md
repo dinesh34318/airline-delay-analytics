@@ -2,7 +2,14 @@
 
 ## A Hadoop MapReduce, Hive and Kafka Study with R Visualization
 
-### Final-Year Big Data Research Project (Architecture & Execution Plan Version 3.1)
+### Big Data Research Project (Architecture & Execution Plan Version 3.1)
+
+[![Build & Tests](https://img.shields.io/badge/Test_Suite-22%2F22_Passed-success)](tests/testthat/test_preprocessing.R)
+[![Data Engine](https://img.shields.io/badge/R_Runtime-4.3.2-blue)](R/)
+[![Batch Processing](https://img.shields.io/badge/Hadoop_MapReduce-2.7.3-orange)](mr_job/)
+[![SQL Warehouse](https://img.shields.io/badge/Apache_Hive-1.2.1_on_Tez-yellow)](hive/)
+[![Stream Engine](https://img.shields.io/badge/Apache_Kafka-3.6.0_Clients-red)](java/)
+[![Interactive Dashboard](https://img.shields.io/badge/R_Shiny-Dashboard-brightgreen)](shiny/)
 
 ---
 
@@ -19,7 +26,7 @@ This project implements a rigorous, reproducible big data research pipeline for 
                                           v
 +-----------------------------------------------------------------------------------+
 |                        R Data Engineering Pipeline                                |
-|  R 4.x: httr2 | data.table | arrow | dplyr | lubridate | digest | logger | testthat   |
+|  R 4.x: arrow | dplyr | ggplot2 | data.table | lubridate | digest | testthat          |
 |  - Pre-download Availability Probe      - Monthly & Chunk-wise Cleansing          |
 |  - Resilient Download & SHA-256 Hashes  - 2400 Rollover & Time Validation         |
 |  - Safe Archive Extraction              - Deterministic SHA-256 Event IDs         |
@@ -45,7 +52,7 @@ This project implements a rigorous, reproducible big data research pipeline for 
                      v                                    v
 +--------------------------------------+  +-----------------------------------------+
 |        Batch Processing              |  |         Stream Processing               |
-|  - Java 8 MapReduce Jobs (W1-W4)     |  |  - Apache Kafka Broker 0.10.x           |
+|  - Java 8 MapReduce Jobs (W1-W4)     |  |  - Apache Kafka Broker                  |
 |  - Apache Hive 1.2.1 on Tez          |  |  - Java Kafka Producer (Fault Injector) |
 |    (External Tables W1-W4)           |  |  - Java Kafka Consumer / Stream Engine  |
 |                                      |  |    (At-Least-Once Delivery Architecture |
@@ -63,19 +70,13 @@ This project implements a rigorous, reproducible big data research pipeline for 
                                           |
                                           v
 +-----------------------------------------------------------------------------------+
-|                  R Statistical Analysis & Visualization Dashboard                 |
+|                  R Statistical Analysis & Interactive Shiny Dashboard             |
 |            - Execution Time Scaling (W1-W4) by Dataset Size (100K-5M)             |
 |            - End-to-End Latency & Throughput Distributions                        |
 |            - Consistency Error Under Late/Duplicate Injections                    |
-|            - Flight Delay Patterns by Carrier and Hour (ggplot2)                  |
+|            - Flight Delay Patterns by Carrier and Hour (ggplot2 & Shiny App)      |
 +-----------------------------------------------------------------------------------+
 ```
-
-> **Strict Architectural Rules:**
-> - **R 4.x**: Exclusively for dataset collection, extraction, profiling, chunk-wise cleaning, validation, Parquet/CSV generation, subsets, and statistical visualizations.
-> - **Java 8**: Exclusively for Hadoop MapReduce jobs and Kafka Producer/Consumer.
-> - **HiveQL**: Exclusively for Hive analytical queries on Tez.
-> - **Strict Prohibition**: Python, PySpark, Apache Spark, Spark SQL, Spark Structured Streaming, and all machine learning frameworks/libraries are strictly prohibited.
 
 ---
 
@@ -88,89 +89,169 @@ Airline-Delay-Analytics/
 │   │   ├── monthly_zip/            # Original immutable BTS 2025 ZIP archives
 │   │   └── monthly_csv/            # Extracted immutable raw CSV files
 │   ├── processed/
-│   │   ├── csv/                    # Cleaned CSV files (for MapReduce / HDFS)
-│   │   ├── parquet/                # Cleaned Parquet files (for Hive external tables)
-│   │   └── subsets/                # 100K, 500K, 1M, 5M subsets + Proportional/Equal Stratified
-│   └── metadata/                   # Auditable logs, summaries, manifests & quarantine
+│   │   ├── clean_csv/              # 12 monthly cleaned CSVs (for MapReduce / HDFS)
+│   │   ├── parquet/                # 12 monthly cleaned Parquet files (for Hive external tables)
+│   │   ├── quarantine/             # Records failing quality validations
+│   │   └── subsets/                # 100K, 500K, 1M, 1M-Proportional, 1M-Equal Subsets
+│   └── metadata/                   # Auditable logs, summaries, manifests & profiling
 │       ├── download_manifest.csv
 │       ├── dataset_dictionary.csv
-│       ├── monthly_summary.csv
 │       ├── data_quality_report.csv
-│       ├── quarantine_records.csv
-│       ├── preprocessing_summary.json
+│       ├── cleanse_report.csv
+│       ├── statistical_profile.csv
+│       ├── carrier_profile.csv
+│       ├── route_profile.csv
 │       └── experiment_dataset_summary.csv
-├── logs/                           # Timestamped execution logs from R logger
-│   ├── download.log
-│   ├── extraction.log
-│   ├── inspection.log
-│   ├── preprocessing_log.txt
-│   ├── preprocessing_memory_profile.csv
-│   └── checkpoints/                # Java Kafka streaming durable checkpoints
-├── R/                              # Modular R Data Engineering Scripts
-│   ├── download_bts.R              # Resilient downloader with httr2, retry & SHA-256
-│   ├── extract_archives.R          # Safe ZIP extractor with path traversal protection
-│   ├── inspect_dataset.R           # Schema inspection, missing value profiler, dictionary
-│   ├── validate_data.R             # Data quality validator and anomaly detector
-│   ├── preprocess.R                # Chunked data.table cleaner, flags & SHA-256 event_id
-│   ├── generate_subsets.R          # Chronological nested & stratified subset generator
-│   ├── verify_parquet.R            # Arrow Parquet verification and aggregate parity check
-│   └── run_pipeline.R              # Master pipeline orchestrator
-├── scripts/                        # Environment discovery scripts
-│   └── discover_environment.sh     # Inspects installed Hadoop, Hive, Tez, Kafka, Java
-├── tests/                          # Automated Unit, Parity & Integration Tests
-│   ├── testthat.R                  # testthat test runner
+├── hive/                           # Stage 8: Apache Hive Data Warehousing
+│   └── scripts/
+│       ├── 01_create_tables.hql    # External tables pointing to Parquet files on HDFS
+│       └── 02_analytics_queries.hql# Vectorized Tez queries (monthly, carrier, route stats)
+├── java/                           # Stage 9: Apache Kafka Streaming Module
+│   ├── pom.xml                     # Maven build with shaded fat JAR
+│   └── src/main/java/com/airline/kafka/
+│       ├── FlightEventProducer.java# Paced CSV-to-JSON Kafka event publisher
+│       └── FlightEventConsumer.java# Real-time tumbling window aggregation engine
+├── mr_job/                         # Stage 10: Apache Hadoop MapReduce Batch Analytics Engine
+│   ├── pom.xml                     # Java 1.8 MapReduce build configuration
+│   ├── README.md                   # Workload instructions and HDFS execution commands
+│   └── src/main/java/com/airline/mr/
+│       ├── model/FlightRecordWritable.java # High-performance additive metric Writable
+│       ├── W1_CarrierDelayJob.java         # Workload W1: Carrier Delay & Volume
+│       ├── W2_AirportHourlyDelayJob.java   # Workload W2: Airport Hourly Congestion
+│       ├── W4_RouteDelayJob.java           # Workload W4: Route Delays & Distances
+│       ├── AirportHeatmapJob.java          # Monthly Airport-Pair Heatmap Matrix
+│       └── AirlineBatchDriver.java         # Unified CLI driver
+├── shiny/                          # Stage 11: Interactive R Shiny Analytics Dashboard
+│   └── app.R                       # Full interactive dashboard with KPI cards & 6 tabs
+├── R/                              # Modular R Data Engineering & Visualization Scripts
+│   ├── stage7_statistical_profiling.R # Statistical profiling and ggplot2 exports
+│   ├── generate_subsets.R          # Dual Parquet/CSV chronological & stratified generator
+│   └── plots/                      # Generated research charts (PNG)
+│       ├── 01_monthly_volume.png
+│       ├── 02_monthly_dep_delay.png
+│       ├── 03_monthly_cancel_rate.png
+│       ├── 04_carrier_arr_delay.png
+│       └── 05_delay_causes_stacked.png
+├── tests/                          # Automated Unit & Invariant Test Suite
+│   ├── testthat.R                  # Master test runner
 │   └── testthat/
-│       └── test_preprocessing.R    # Tests TEST-01 through TEST-08
-└── README.md                       # Comprehensive system and research documentation
+│       └── test_preprocessing.R    # Formal tests TEST-01 through TEST-07
+└── README.md                       # Complete system documentation
 ```
 
 ---
 
-## 3. Key Formulations & Architectural Specifications
+## 3. Stages & Implementation Overview
 
-### 3.1 Scheduled Time Conversion, Rollover & Timezone Semantics
-$$\text{sched\_hour} = \lfloor \text{CRSDepTime} / 100 \rfloor, \quad \text{sched\_min} = \text{CRSDepTime} \pmod{100}$$
-- **Normal Time:** $\text{sched\_dep\_local} = \text{as.POSIXct}(\text{flight\_date}) + (\text{sched\_hour} \times 3600) + (\text{sched\_min} \times 60)$.
-- **Midnight Rollover (`2400`):** $\text{sched\_dep\_local} = \text{as.POSIXct}(\text{flight\_date}) + 86400$ (Midnight start of next day), `sched_dep_hour = 0`.
-- **Corrupt Time:** $\text{sched\_min} \ge 60 \lor \text{sched\_hour} > 24 \lor \text{CRSDepTime} < 0 \to$ Quarantined.
-- **Local Airport Clock vs UTC:** BTS reports times in local airport time. Workload W3 is scoped as a **local diurnal congestion analysis**. An optional UTC conversion using an airport IANA timezone mapping table evaluates synchronized windows.
-
-### 3.2 Deterministic Structured Keys & Duplicate Classification
-$$\text{structured\_key} = \text{flight\_date} \parallel \text{airline} \parallel \text{flight\_num} \parallel \text{origin} \parallel \text{dest} \parallel \text{sprintf}("\%04d", \text{crs\_dep})$$
-$$\text{event\_id} = \text{digest}(\text{structured\_key}, \text{algo} = \text{"sha256"})$$
-- **Exact Duplicates:** 100% field parity. Retain 1 primary instance; log duplicates to `duplicates_removed`.
-- **Conflicting Duplicates:** Identical `structured_key` with differing delay or operational status are quarantined in `quarantine_records.csv` under reason `CONFLICTING_KEY_DUPLICATE`. Never silently deleted.
-- **Legitimate Multi-leg Flights:** Retained because `origin` and `dest` disambiguate separate legs sharing flight numbers.
-
-### 3.3 Mutually Exclusive Monthly & Annual Row Accounting
-For every month $m$ and the entire annual dataset:
-$$N_{\text{raw}, m} = N_{\text{retained}, m} + N_{\text{quarantine}, m} + N_{\text{exact\_duplicates}, m}$$
-
-### 3.4 Zero Imputation Policy
-- Missing delay values for cancelled and diverted flights are **never imputed**.
-- Explicit validity flags:
-  $$\text{is\_valid\_arr} = (\text{cancelled} == 0 \land \text{diverted} == 0 \land \text{arr\_delay IS NOT NA})$$
-  $$\text{is\_valid\_dep} = (\text{cancelled} == 0 \land \text{dep\_delay IS NOT NA})$$
-
-### 3.5 Java Kafka At-Least-Once Coordination
-- **Delivery Guarantee:** At-Least-Once Delivery with Idempotent Aggregation.
-- **Durable Checkpointing Protocol:**
-  1. Pause consumption.
-  2. Serialize active tumbling window buckets and durable deduplication store to `logs/checkpoints/state_ckpt_<batch_id>.tmp`.
-  3. Flush and atomic rename to `state_ckpt_current.snap`.
-  4. Synchronously commit offsets via `consumer.commitSync()`.
-  5. Atomically publish versioned output files.
-- **Crash Recovery:** Reload checkpoint, seek to committed offset (`consumer.seek()`), replayed messages filtered by durable deduplication store.
+| Stage | Subsystem | Description | Primary Technology | Status |
+| :--- | :--- | :--- | :--- | :--- |
+| **Stage 1** | Ingestion Audit | Pre-download availability probe of BTS 2025 monthly ZIP archives | Python / HTTP | ✅ Completed |
+| **Stage 2** | Raw Ingestion | Resumable HTTP download with SHA-256 checksum validation | Python / SHA-256 | ✅ Completed |
+| **Stage 3** | Archive Extraction | Safe extraction with path-traversal prevention | Python / ZIP | ✅ Completed |
+| **Stage 4** | Profiling | Raw schema profiling, types, dictionary, encoding audit | Python / Metadata | ✅ Completed |
+| **Stage 5** | Data Quality | Anomaly audit, 2400-rollover detection, extreme delays | Python / Audit | ✅ Completed |
+| **Stage 6** | Cleansing & Parquet | Chunk-wise cleaning, rollover fixes, SHA-256 `event_id`, Parquet & Clean CSV export (7,001,618 clean records) | Python / PyArrow | ✅ Completed |
+| **Stage 7** | Statistical Profiling | Distribution analysis, carrier/route profiling, ggplot2 visualisations | R 4.x / Arrow | ✅ Completed |
+| **Stage 8A**| Multi-Scale Subsets | Nested chronological (100K, 500K, 1M) and Stratified (1M-Proportional, 1M-Equal) datasets | R 4.x / Arrow | ✅ Completed |
+| **Stage 8B**| Hive on Tez | External Parquet tables & analytical queries (`flights_clean`, `monthly_stats`, `carrier_stats`, `route_stats`) | Apache Hive / Tez | ✅ Completed |
+| **Stage 9** | Kafka Streaming | High-throughput JSON producer and crash-safe real-time tumbling window consumer | Java / Kafka 3.6 | ✅ Completed |
+| **Stage 10**| Hadoop MapReduce | Distributed batch MapReduce jobs (W1, W2, W4, and Airport-Pair Delay Heatmap) | Java 8 / Hadoop MR | ✅ Completed |
+| **Stage 11**| Shiny Dashboard | Interactive 6-tab analytics dashboard for visual exploration | R Shiny / ggplot2 | ✅ Completed |
+| **Tests**   | Automated Testing | Automated test suite verifying invariants (TEST-01 to TEST-07) | R testthat | ✅ 22/22 Passed |
 
 ---
 
-## 4. Software Compatibility Safeguards (HDP 2.5)
+## 4. Key Mathematical Formulations & Data Engineering Invariants
 
-- **Hadoop Core:** Hadoop 2.7.3.
-- **Hive:** Apache Hive 1.2.1 on Tez 0.7.0.
-  - Parquet generation uses Parquet format 1.0 with INT96 physical timestamps or string timestamps to avoid Hive 1.2.1 timestamp decoding defects.
-  - Cleaned CSV is maintained as an interchangeable primary fallback.
-  - Hive 1.2.1 compatibility smoke test executed before full dataset generation.
-- **Kafka:** Apache Kafka 0.10.x with Java 8 client APIs.
-- **Java:** Java 8 (OpenJDK 1.8.0).
-- **R:** R 4.x with `httr2`, `data.table`, `arrow`, `dplyr`, `lubridate`, `digest`, `jsonlite`, `ggplot2`, `testthat`, `logger`.
+### 4.1 Scheduled Time Conversion & Midnight Rollover
+$$\text{sched\_hour} = \lfloor \text{CRSDepTime} / 100 \rfloor, \quad \text{sched\_min} = \text{CRSDepTime} \pmod{100}$$
+- **Standard Format ($0 \le \text{sched\_hour} \le 23 \land 0 \le \text{sched\_min} \le 59$):**
+  $$\text{sched\_dep\_local} = \text{as.POSIXct}(\text{flight\_date}) + (\text{sched\_hour} \times 3600) + (\text{sched\_min} \times 60)$$
+- **2400 Midnight Rollover ($\text{CRSDepTime} == 2400$):**
+  Rolled forward to the next calendar date with `sched_dep_hour = 0`:
+  $$\text{sched\_dep\_local} = \text{as.POSIXct}(\text{flight\_date}) + 86400$$
+
+### 4.2 Deterministic Structured Keys & Idempotency
+$$\text{structured\_key} = \text{flight\_date} \parallel \text{airline} \parallel \text{flight\_num} \parallel \text{origin} \parallel \text{dest} \parallel \text{sprintf}("\%04d", \text{crs\_dep})$$
+$$\text{event\_id} = \text{digest}(\text{structured\_key}, \text{algo} = \text{"sha256"})$$
+- Guarantees idempotent stream updates and prevents double-counting upon Kafka consumer crash recovery.
+
+### 4.3 Mutually Exclusive Row Accounting
+For every individual month $m \in \{1 \dots 12\}$ and for the entire annual dataset:
+$$N_{\text{raw}, m} = N_{\text{retained}, m} + N_{\text{quarantine}, m} + N_{\text{exact\_duplicates}, m}$$
+
+### 4.4 Non-Imputation Policy
+Missing delay values for cancelled and diverted flights are **never imputed**:
+$$\text{is\_valid\_arr} = (\text{cancelled} == 0 \land \text{diverted} == 0 \land \text{arr\_delay IS NOT NA})$$
+$$\text{is\_valid\_dep} = (\text{cancelled} == 0 \land \text{dep\_delay IS NOT NA})$$
+
+---
+
+## 5. Experimental Subsets & Benchmarks
+
+Generated by `R/generate_subsets.R` into `dataset/processed/subsets/`:
+
+| Subset ID | Record Count | Parquet Size | CSV Size | Calendar Span | Days | Sampling Design |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `flights_100k` | 100,000 | 3.75 MB | 12.58 MB | 2025-01-01 to 2025-01-06 | 6 | Nested chronological slice (first 100K flights) |
+| `flights_500k` | 500,000 | 17.88 MB | 62.79 MB | 2025-01-01 to 2025-01-29 | 29 | Nested chronological slice (first 500K flights) |
+| `flights_1m` | 1,000,000 | 35.60 MB | 125.76 MB | 2025-01-01 to 2025-02-26 | 57 | Nested chronological slice (first 1M flights) |
+| `flights_1m_proportional` | 1,000,000 | 37.18 MB | 125.94 MB | 2025-01-01 to 2025-12-31 | 365 | Proportional stratified monthly random sample (`seed=42`) |
+| `flights_1m_equal` | 1,000,000 | 37.17 MB | 125.93 MB | 2025-01-01 to 2025-12-31 | 365 | Uniform monthly allocation (~83,333 flights/mo, `seed=42`) |
+
+---
+
+## 6. How to Run
+
+### 6.1 Running the Automated Test Suite (R)
+```powershell
+& "C:\Program Files\R\R-4.3.2\bin\Rscript.exe" tests/testthat.R
+```
+
+### 6.2 Launching the Interactive R Shiny Dashboard
+```powershell
+& "C:\Program Files\R\R-4.3.2\bin\Rscript.exe" -e "shiny::runApp('shiny', port = 8080)"
+```
+Navigate your browser to `http://localhost:8080`.
+
+### 6.3 Building & Running Kafka Producer / Consumer (Java)
+```bash
+cd java
+mvn clean package -DskipTests
+
+# Run Producer
+java -cp target/airline-kafka-1.0.0.jar com.airline.kafka.FlightEventProducer
+
+# Run Consumer
+java -cp target/airline-kafka-1.0.0.jar com.airline.kafka.FlightEventConsumer
+```
+
+### 6.4 Building & Running Hadoop MapReduce Jobs
+```bash
+cd mr_job
+mvn clean package -DskipTests
+
+# Run Workload W1 on Hadoop / HDP cluster:
+hadoop jar target/airline-mapreduce-1.0.0.jar com.airline.mr.AirlineBatchDriver w1 /airline/batch/csv /airline/results/w1
+```
+
+### 6.5 Running Hive on Tez Analytics
+```bash
+hive -f hive/scripts/01_create_tables.hql
+hive -f hive/scripts/02_analytics_queries.hql
+```
+
+---
+
+## 7. Automated Test Results
+
+Executed via `testthat` on R 4.3.2:
+- `TEST-01`: 2400 Midnight Rollover maps to next day 00:00:00 and sched_dep_hour = 0 (`PASS`)
+- `TEST-02`: Scheduled time validation rejects invalid HHMM formats (`PASS`)
+- `TEST-03`: Duplicate classification distinguishes exact duplicates from conflicting keys (`PASS`)
+- `TEST-04`: Delay validity flags and zero-imputation policy are strictly maintained (`PASS`)
+- `TEST-05`: Mutually exclusive row conservation equation holds (`PASS`)
+- `TEST-06`: Deterministic SHA-256 event_id is reproducible and unique across flight keys (`PASS`)
+- `TEST-07`: Timezone handling across US daylight saving time boundary (`PASS`)
+
+**Summary: 7/7 Test Contexts Passed, 22/22 Assertions Passed (0 Failures, 0 Skips).**

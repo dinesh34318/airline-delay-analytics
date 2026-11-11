@@ -7,6 +7,12 @@ dataset/metadata/*.csv
 R/*.exe
 R/library/
 
+# ── Java / Maven ──
+target/
+**/target/
+*.class
+*.jar
+
 # ── Logs ──
 logs/
 

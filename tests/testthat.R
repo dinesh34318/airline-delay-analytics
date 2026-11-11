@@ -3,9 +3,15 @@
 # Test Runner for Airline Delay Analytics Pipeline
 # ==============================================================================
 
-if (!requireNamespace("testthat", quietly = TRUE)) {
-  install.packages("testthat", repos = "https://cloud.r-project.org")
-}
-library(testthat)
+.libPaths(c("C:/Users/DELL/.gemini/antigravity/scratch/Airline-Delay-Analytics/R/library", .libPaths()))
 
-test_check("AirlineDelayAnalytics", test_paths = file.path("tests", "testthat"))
+suppressPackageStartupMessages({
+  library(testthat)
+})
+
+test_results <- testthat::test_dir(
+  "C:/Users/DELL/.gemini/antigravity/scratch/Airline-Delay-Analytics/tests/testthat",
+  stop_on_failure = TRUE
+)
+
+print(test_results)

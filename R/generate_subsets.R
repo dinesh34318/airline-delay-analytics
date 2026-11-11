@@ -1,191 +1,188 @@
 # ==============================================================================
 # R/generate_subsets.R
 # Pipeline Stage 8: Nested Chronological Subsets & Stratified Datasets Generator
-# Strict Architecture: R 4.x (data.table, arrow, logger)
+# Technology: R 4.x (arrow, dplyr)
 # ==============================================================================
 
+.libPaths(c("C:/Users/DELL/.gemini/antigravity/scratch/Airline-Delay-Analytics/R/library", .libPaths()))
+
 suppressPackageStartupMessages({
-  if (!requireNamespace("data.table", quietly = TRUE)) install.packages("data.table", repos = "https://cloud.r-project.org")
-  if (!requireNamespace("arrow", quietly = TRUE)) install.packages("arrow", repos = "https://cloud.r-project.org")
-  if (!requireNamespace("logger", quietly = TRUE)) install.packages("logger", repos = "https://cloud.r-project.org")
-  library(data.table)
   library(arrow)
-  library(logger)
+  library(dplyr)
 })
 
-log_file <- file.path("logs", "preprocessing_log.txt")
-dir.create("logs", showWarnings = FALSE, recursive = TRUE)
-log_appender(appender_tee(log_file))
-log_info("Initializing Experimental Subset Generator (Stage 8)")
+BASE_DIR        <- "C:/Users/DELL/.gemini/antigravity/scratch/Airline-Delay-Analytics"
+PARQUET_DIR     <- file.path(BASE_DIR, "dataset", "processed", "parquet")
+SUBSETS_DIR     <- file.path(BASE_DIR, "dataset", "processed", "subsets")
+METADATA_DIR    <- file.path(BASE_DIR, "dataset", "metadata")
+SUMMARY_FILE    <- file.path(METADATA_DIR, "experiment_dataset_summary.csv")
+LOG_FILE        <- file.path(BASE_DIR, "logs", "subset_generation.log")
 
-CLEAN_PARQUET_DIR <- file.path("dataset", "processed", "parquet")
-SUBSETS_DIR <- file.path("dataset", "processed", "subsets")
-METADATA_DIR <- file.path("dataset", "metadata")
-EXPERIMENT_SUMMARY_FILE <- file.path(METADATA_DIR, "experiment_dataset_summary.csv")
+dir.create(SUBSETS_DIR, recursive = TRUE, showWarnings = FALSE)
+dir.create(METADATA_DIR, recursive = TRUE, showWarnings = FALSE)
+dir.create(file.path(BASE_DIR, "logs"), recursive = TRUE, showWarnings = FALSE)
 
-dir.create(SUBSETS_DIR, showWarnings = FALSE, recursive = TRUE)
+log_msg <- function(msg) {
+  ts   <- format(Sys.time(), "%Y-%m-%d %H:%M:%S UTC", tz = "UTC")
+  line <- paste0("[", ts, "] ", msg)
+  message(line)
+  write(line, file = LOG_FILE, append = TRUE)
+}
 
-TARGET_SIZES <- c(100000L, 500000L, 1000000L, 5000000L)
+log_msg("====================================================================")
+log_msg("STAGE 8 - Experimental Subset Generation (Arrow + dplyr)")
+log_msg("====================================================================")
 
-export_subset_dual_format <- function(dt_sub, subset_id, sampling_method, seasonality_note) {
+# Function to export subset in dual format (Parquet & CSV)
+export_subset <- function(df, subset_id, sampling_method, seasonality_note) {
   parquet_path <- file.path(SUBSETS_DIR, paste0(subset_id, ".parquet"))
-  csv_path <- file.path(SUBSETS_DIR, paste0(subset_id, ".csv"))
+  csv_path     <- file.path(SUBSETS_DIR, paste0(subset_id, ".csv"))
   
-  arrow::write_parquet(
-    dt_sub,
-    parquet_path,
-    compression = "snappy",
-    use_deprecated_int96_timestamps = TRUE
-  )
-  fwrite(dt_sub, csv_path)
+  log_msg(paste0("Writing subset '", subset_id, "' (", nrow(df), " rows)..."))
   
-  sz_parq <- file.info(parquet_path)$size
-  sz_csv  <- file.info(csv_path)$size
-  n_rows  <- nrow(dt_sub)
+  arrow::write_parquet(df, parquet_path, compression = "snappy")
+  arrow::write_csv_arrow(df, csv_path)
   
-  start_ts <- as.character(min(dt_sub$sched_dep_local))
-  end_ts   <- as.character(max(dt_sub$sched_dep_local))
-  days_span <- round(as.numeric(difftime(max(dt_sub$sched_dep_local), min(dt_sub$sched_dep_local), units = "days")), 2)
+  sz_parq   <- file.info(parquet_path)$size
+  sz_csv    <- file.info(csv_path)$size
+  n_rows    <- nrow(df)
+  start_dt  <- as.character(min(df$flight_date, na.rm = TRUE))
+  end_dt    <- as.character(max(df$flight_date, na.rm = TRUE))
+  days_span <- as.numeric(difftime(as.Date(end_dt), as.Date(start_dt), units = "days")) + 1
   
-  log_info("Generated subset '{subset_id}': {n_rows} rows, {days_span} days spanned ({start_ts} to {end_ts})")
+  log_msg(paste0("Subset '", subset_id, "' generated: ", n_rows, " rows (", 
+                 round(sz_parq / 1024 / 1024, 2), " MB Parquet, ", 
+                 round(sz_csv / 1024 / 1024, 2), " MB CSV), Span: ", 
+                 start_dt, " to ", end_dt, " (", days_span, " days)"))
   
   data.frame(
-    subset_id = subset_id,
-    record_count = n_rows,
-    parquet_size_bytes = sz_parq,
-    csv_size_bytes = sz_csv,
-    start_timestamp = start_ts,
-    end_timestamp = end_ts,
+    subset_id             = subset_id,
+    record_count          = n_rows,
+    parquet_size_bytes    = sz_parq,
+    csv_size_bytes        = sz_csv,
+    start_date            = start_dt,
+    end_date              = end_dt,
     calendar_days_spanned = days_span,
-    sampling_method = sampling_method,
+    sampling_method       = sampling_method,
     seasonality_bias_note = seasonality_note,
-    stringsAsFactors = FALSE
+    stringsAsFactors      = FALSE
   )
 }
 
-execute_subset_generation_pipeline <- function() {
-  parquet_files <- sort(list.files(CLEAN_PARQUET_DIR, pattern = "On_Time_.*\\.parquet$", full.names = TRUE))
-  if (length(parquet_files) == 0) {
-    log_warn("No cleaned monthly Parquet files found in {CLEAN_PARQUET_DIR}.")
-    return(invisible(NULL))
-  }
-  
-  log_info("Reading {length(parquet_files)} cleaned monthly Parquet files into memory sequentially...")
-  monthly_dts <- list()
-  for (pf in parquet_files) {
-    monthly_dts[[length(monthly_dts) + 1]] <- as.data.table(arrow::read_parquet(pf))
-  }
-  
-  full_dt <- rbindlist(monthly_dts, fill = TRUE)
-  rm(monthly_dts)
-  gc()
-  
-  # Ensure strict chronological ordering
-  setorder(full_dt, sched_dep_local)
-  total_available <- nrow(full_dt)
-  log_info("Total cleaned flights available: {total_available}")
-  
-  summary_records <- list()
-  
-  # 1. Export Full Dataset
-  summary_records[[1]] <- export_subset_dual_format(
-    full_dt,
-    "flights_full",
-    "Complete annual dataset (all valid retained records)",
-    "Unbiased full-year empirical coverage"
-  )
-  
-  # 2. Nested Chronological Subsets
-  for (target_n in TARGET_SIZES) {
-    if (total_available >= target_n) {
-      sub_dt <- full_dt[1:target_n]
-      subset_name <- sprintf("flights_%s", ifelse(target_n >= 1000000, paste0(target_n / 1000000, "m"), paste0(target_n / 1000, "k")))
-      note <- sprintf("Covers first %d flights from beginning of year. High seasonal concentration in early months.", target_n)
-      
-      summary_records[[length(summary_records) + 1]] <- export_subset_dual_format(
-        sub_dt,
-        subset_name,
-        "Nested chronological slice (first N flights)",
-        note
-      )
-      rm(sub_dt)
-      gc()
-    } else {
-      log_warn("Skipping subset {target_n}: insufficient total records ({total_available})")
-    }
-  }
-  
-  # 3. Proportional Monthly Stratified Dataset (1M records)
-  target_stratified_n <- 1000000L
-  if (total_available >= target_stratified_n) {
-    log_info("Generating Proportional Monthly Stratified Dataset (N = {target_stratified_n})...")
-    set.seed(42)
-    
-    # Calculate proportion per month
-    full_dt[, month_id := format(sched_dep_local, "%Y-%m")]
-    month_counts <- full_dt[, .N, by = month_id]
-    month_counts[, prop := N / sum(N)]
-    month_counts[, target_k := round(target_stratified_n * prop)]
-    
-    # Adjust last month for rounding
-    discrepancy <- target_stratified_n - sum(month_counts$target_k)
-    month_counts[nrow(month_counts), target_k := target_k + discrepancy]
-    
-    stratified_chunks <- list()
-    for (i in seq_len(nrow(month_counts))) {
-      m_id <- month_counts$month_id[i]
-      k_needed <- month_counts$target_k[i]
-      month_rows <- full_dt[month_id == m_id]
-      idx <- sample.int(nrow(month_rows), size = k_needed, replace = FALSE)
-      stratified_chunks[[i]] <- month_rows[idx]
-    }
-    
-    strat_dt <- rbindlist(stratified_chunks)
-    strat_dt[, month_id := NULL]
-    setorder(strat_dt, sched_dep_local)
-    
-    summary_records[[length(summary_records) + 1]] <- export_subset_dual_format(
-      strat_dt,
-      "flights_1m_proportional",
-      "Proportional stratified monthly sampling (seed=42)",
-      "Preserves seasonal flight volume variations across all 12 calendar months."
-    )
-    rm(strat_dt, stratified_chunks)
-    gc()
-    
-    # 4. Equal Monthly Allocation Dataset (1M records - Robustness Experiment)
-    log_info("Generating Equal Monthly Allocation Dataset (N = {target_stratified_n})...")
-    k_per_month <- floor(target_stratified_n / nrow(month_counts))
-    equal_chunks <- list()
-    for (i in seq_len(nrow(month_counts))) {
-      m_id <- month_counts$month_id[i]
-      month_rows <- full_dt[month_id == m_id]
-      idx <- sample.int(nrow(month_rows), size = min(k_per_month, nrow(month_rows)), replace = FALSE)
-      equal_chunks[[i]] <- month_rows[idx]
-    }
-    equal_dt <- rbindlist(equal_chunks)
-    equal_dt[, month_id := NULL]
-    setorder(equal_dt, sched_dep_local)
-    
-    summary_records[[length(summary_records) + 1]] <- export_subset_dual_format(
-      equal_dt,
-      "flights_1m_equal",
-      "Equal monthly allocation sampling (N/12 per month, seed=42)",
-      "Artificially balances month representation; removes volume weighting to isolate seasonal volatility."
-    )
-    rm(equal_dt, equal_chunks)
-    gc()
-    
-    full_dt[, month_id := NULL]
-  }
-  
-  exp_summary_df <- do.call(rbind, summary_records)
-  write.csv(exp_summary_df, EXPERIMENT_SUMMARY_FILE, row.names = FALSE)
-  log_info("Experiment dataset summary written to: {EXPERIMENT_SUMMARY_FILE}")
-  print(exp_summary_df[, c("subset_id", "record_count", "calendar_days_spanned", "sampling_method")])
-  invisible(exp_summary_df)
+# Open all 12 parquet files as a unified Arrow dataset
+ds <- arrow::open_dataset(PARQUET_DIR)
+total_flights <- ds %>% count() %>% collect() %>% pull(n)
+log_msg(paste("Total flights in dataset:", format(total_flights, big.mark = ",")))
+
+summary_list <- list()
+
+# -----------------------------------------------------------------------------
+# 1. Chronological subsets: 100k, 500k, 1m, 5m
+# Because data is organized across months 01 through 12, files 01..12 are already
+# month-ordered. We can extract target sizes by pulling from early months.
+# -----------------------------------------------------------------------------
+files <- sort(list.files(PARQUET_DIR, pattern = "^clean_2025_.*\\.parquet$", full.names = TRUE))
+log_msg(paste("Found", length(files), "monthly parquet files"))
+
+# Read month 1 for 100k
+log_msg("Loading initial files for chronological subsets...")
+df_m1 <- arrow::read_parquet(files[1]) %>% arrange(flight_date, crs_dep)
+
+# 100K subset
+sub_100k <- head(df_m1, 100000)
+summary_list[[length(summary_list) + 1]] <- export_subset(
+  sub_100k, "flights_100k",
+  "Nested chronological slice (first 100K flights)",
+  "Covers first ~5 days of January 2025. Severe early winter seasonality."
+)
+rm(sub_100k); gc()
+
+# 500K subset
+sub_500k <- head(df_m1, 500000)
+summary_list[[length(summary_list) + 1]] <- export_subset(
+  sub_500k, "flights_500k",
+  "Nested chronological slice (first 500K flights)",
+  "Covers majority of January 2025 (~28 days). January post-holiday seasonality."
+)
+rm(sub_500k); gc()
+
+# 1M subset: combine month 1 and month 2
+df_m2 <- arrow::read_parquet(files[2]) %>% arrange(flight_date, crs_dep)
+df_m1_m2 <- bind_rows(df_m1, df_m2) %>% arrange(flight_date, crs_dep)
+rm(df_m1, df_m2); gc()
+
+sub_1m <- head(df_m1_m2, 1000000)
+summary_list[[length(summary_list) + 1]] <- export_subset(
+  sub_1m, "flights_1m",
+  "Nested chronological slice (first 1M flights)",
+  "Spans January to late February 2025. Winter flight distribution."
+)
+rm(sub_1m, df_m1_m2); gc()
+
+# -----------------------------------------------------------------------------
+# 2. Stratified Sampling across all 12 months (1M Proportional & 1M Equal)
+# Process month by month to avoid 16 GB RAM exhaustion
+# -----------------------------------------------------------------------------
+log_msg("Generating stratified 1M subsets across all 12 months...")
+
+# Get monthly counts from statistical_profile.csv or compute from files
+monthly_meta_path <- file.path(METADATA_DIR, "statistical_profile.csv")
+if (file.exists(monthly_meta_path)) {
+  meta_df <- read.csv(monthly_meta_path)
+  m_counts <- meta_df$total_flights
+} else {
+  m_counts <- sapply(files, function(f) arrow::open_dataset(f) %>% count() %>% collect() %>% pull(n))
 }
 
-if (!interactive()) {
-  execute_subset_generation_pipeline()
+prop_k <- round(1000000 * (m_counts / sum(m_counts)))
+# Adjust last month for exact 1,000,000
+prop_k[length(prop_k)] <- prop_k[length(prop_k)] + (1000000 - sum(prop_k))
+
+equal_k <- rep(floor(1000000 / 12), 12)
+equal_k[12] <- equal_k[12] + (1000000 - sum(equal_k))
+
+set.seed(42)
+prop_samples  <- list()
+equal_samples <- list()
+
+for (i in seq_along(files)) {
+  log_msg(paste0("Sampling from month ", i, " (file: ", basename(files[i]), "): prop=", prop_k[i], ", equal=", equal_k[i]))
+  m_df <- arrow::read_parquet(files[i])
+  n_total <- nrow(m_df)
+  
+  # Sample proportional
+  idx_p <- sample.int(n_total, size = min(prop_k[i], n_total), replace = FALSE)
+  prop_samples[[i]] <- m_df[idx_p, ]
+  
+  # Sample equal
+  idx_e <- sample.int(n_total, size = min(equal_k[i], n_total), replace = FALSE)
+  equal_samples[[i]] <- m_df[idx_e, ]
+  
+  rm(m_df); gc()
 }
+
+df_prop <- bind_rows(prop_samples) %>% arrange(flight_date, crs_dep)
+rm(prop_samples); gc()
+summary_list[[length(summary_list) + 1]] <- export_subset(
+  df_prop, "flights_1m_proportional",
+  "Proportional monthly stratified random sample (seed=42)",
+  "Preserves empirical seasonal flight distribution across all 12 calendar months."
+)
+rm(df_prop); gc()
+
+df_equal <- bind_rows(equal_samples) %>% arrange(flight_date, crs_dep)
+rm(equal_samples); gc()
+summary_list[[length(summary_list) + 1]] <- export_subset(
+  df_equal, "flights_1m_equal",
+  "Equal monthly allocation random sample (~83,333 flights/month, seed=42)",
+  "Artificially balances month representation; removes volume weighting to isolate seasonal volatility."
+)
+rm(df_equal); gc()
+
+# Combine summary and write
+summary_df <- do.call(rbind, summary_list)
+write.csv(summary_df, SUMMARY_FILE, row.names = FALSE)
+log_msg(paste("Experiment dataset summary written to:", SUMMARY_FILE))
+print(summary_df[, c("subset_id", "record_count", "start_date", "end_date", "calendar_days_spanned")])
+
+log_msg("STAGE 8 - Experimental Subset Generation Completed Successfully.")

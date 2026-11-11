@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- ===========================================================================
+     mr_job/pom.xml — Stage 10: Hadoop MapReduce Batch Analytics Engine
+     Technology: Java 8 / 11 | Apache Hadoop 2.7.3 / 3.x MapReduce API
+     Target: Hortonworks Data Platform (HDP) 2.5 Sandbox / Hadoop Cluster
+     =========================================================================== -->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 
+                             http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>com.airline</groupId>
+  <artifactId>airline-mapreduce</artifactId>
+  <version>1.0.0</version>
+  <packaging>jar</packaging>
+
+  <name>Airline Delay Analytics — Hadoop MapReduce Batch Engine</name>
+  <description>
+    Stage 10: Distributed MapReduce analytical workloads (W1 Carrier Delays,
+    W2 Hourly Airport Congestion, W4 Route Metrics, and Airport Delay Heatmap).
+  </description>
+
+  <properties>
+    <maven.compiler.source>1.8</maven.compiler.source>
+    <maven.compiler.target>1.8</maven.compiler.target>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <hadoop.version>2.7.3</hadoop.version>
+  </properties>
+
+  <dependencies>
+    <!-- Apache Hadoop Client (MR, Common, HDFS) -->
+    <dependency>
+      <groupId>org.apache.hadoop</groupId>
+      <artifactId>hadoop-common</artifactId>
+      <version>${hadoop.version}</version>
+      <scope>provided</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>org.apache.hadoop</groupId>
+      <artifactId>hadoop-mapreduce-client-core</artifactId>
+      <version>${hadoop.version}</version>
+      <scope>provided</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>org.apache.hadoop</groupId>
+      <artifactId>hadoop-client</artifactId>
+      <version>${hadoop.version}</version>
+      <scope>provided</scope>
+    </dependency>
+
+    <!-- JUnit 4 for MR unit tests -->
+    <dependency>
+      <groupId>junit</groupId>
+      <artifactId>junit</artifactId>
+      <version>4.13.2</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <!-- Compiler plugin set to Java 1.8 for HDP 2.5 compatibility -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.11.0</version>
+        <configuration>
+          <source>1.8</source>
+          <target>1.8</target>
+        </configuration>
+      </plugin>
+
+      <!-- Fat / Executable JAR with Main Driver -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+        <version>3.3.0</version>
+        <configuration>
+          <archive>
+            <manifest>
+              <mainClass>com.airline.mr.AirlineBatchDriver</mainClass>
+            </manifest>
+          </archive>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>
